@@ -3,6 +3,7 @@
 - Dépôt : https://github.com/adam-benyekkou/docker-introduction-adam (branche `docker-exercice-securite`)
 - Image initiale : `cavydev/quiz-docker:initial` (ex-`cavydev/dockerfile-exercice2:1.0.0`)
 - Image sécurisée : `cavydev/quiz-docker:secure`
+- Variante DHI : `cavydev/quiz-docker:dhi`
 - Environnement : Docker 29.10.0, Trivy 0.76.0 (`aquasec/trivy`), build multi-étapes sur amd64
 
 ---
@@ -136,45 +137,54 @@ docker tag quiz-docker:initial cavydev/quiz-docker:initial
 docker tag quiz-docker:secure  cavydev/quiz-docker:secure
 docker push cavydev/quiz-docker:initial
 docker push cavydev/quiz-docker:secure
+
+# Variante Docker Hardened Image
+docker build -f Dockerfile.dhi -t quiz-docker:dhi .
+docker tag quiz-docker:dhi cavydev/quiz-docker:dhi
+docker push cavydev/quiz-docker:dhi
 ```
 
 ### 3.2 Tableau comparatif
 
-| Critère | Initial | Sécurisé |
-|---|---|---|
-| Image de base | `node:18-alpine` (Alpine 3.21.3) | `nginxinc/nginx-unprivileged:1.29-alpine3.23` (Alpine 3.23.4) |
-| Taille | 221 MB | **118 MB** (−47 %) |
-| Utilisateur | root (uid 0) | nginx (uid 101) |
-| Outils de développement | node, npm, apk, sources, `node_modules` | absents (seul `dist/` est copié) |
-| Serveur applicatif | serveur de dev Vite | nginx (statique) |
-| Port | 5173 | 8080 |
-| `.dockerignore` | 3 motifs | secrets, artefacts, `.git`, outillage, livrables exclus |
-| Multi-stage | non | oui (2 étapes) |
-| `ADD` | non | non (`COPY` uniquement) |
-| Tags précis | non (`18-alpine`) | oui (versions Node/Alpine/nginx fixées) |
-| Limitation CPU/mémoire | aucune | 0.5 CPU, 128 Mo, 100 pids |
-| Restrictions de privilèges | aucune | `--cap-drop ALL`, `no-new-privileges` |
-| Racine en lecture seule | non | oui (`--read-only` + `tmpfs`) |
-| Accès socket Docker | non | non, prouvé (`Mounts` = 0) |
-| CVE CRITICAL | 5 | **0** |
-| CVE HIGH | 83 | **0** |
-| CVE MEDIUM | 130 | **0** |
-| CVE LOW | 45 | **0** |
-| Total CVE | 264 | **0** |
+| Critère | Initial | Sécurisé | DHI |
+|---|---|---|---|
+| Image de base | `node:18-alpine` (Alpine 3.21.3) | `nginxinc/nginx-unprivileged:1.29-alpine3.23` (Alpine 3.23.4) | `dhi.io/nginx:1.30-alpine3.24` (Alpine 3.24) |
+| Taille | 221 MB | 118 MB (−47 %) | **24,2 MB (−89 %)** |
+| Utilisateur | root (uid 0) | nginx (uid 101) | 65532 |
+| Outils de développement | node, npm, apk, sources, `node_modules` | absents (seul `dist/` est copié) | absents ; busybox et un shell minimal restent présents |
+| Gestionnaire de paquets | apk | apk | absent (pas de correctif à chaud possible) |
+| Serveur applicatif | serveur de dev Vite | nginx (statique) | nginx (statique) |
+| Port | 5173 | 8080 | 8080 |
+| `.dockerignore` | 3 motifs | secrets, artefacts, `.git`, outillage, livrables exclus | identique |
+| Multi-stage | non | oui (2 étapes) | oui (2 étapes) |
+| `ADD` | non | non (`COPY` uniquement) | non (`COPY` uniquement) |
+| Tags précis | non (`18-alpine`) | oui (versions Node/Alpine/nginx fixées) | oui (tags DHI versionnés) |
+| Limitation CPU/mémoire | aucune | 0.5 CPU, 128 Mo, 100 pids | 0.5 CPU, 128 Mo, 100 pids |
+| Restrictions de privilèges | aucune | `--cap-drop ALL`, `no-new-privileges` | `--cap-drop ALL`, `no-new-privileges` |
+| Racine en lecture seule | non | oui (`--read-only` + `tmpfs`) | oui (`--read-only` + 5 `tmpfs` détenus par 65532) |
+| Accès socket Docker | non | non, prouvé (`Mounts` = 0) | non, prouvé (`Mounts` = 0) |
+| CVE CRITICAL | 5 | 0 | 0 |
+| CVE HIGH | 83 | 0 | 0 |
+| CVE MEDIUM | 130 | 0 | 0 |
+| CVE LOW | 45 | 0 | 0 |
+| Total CVE | 264 | **0** | **0** |
 
-Sources : `securite/scans/initial.txt`, `securite/scans/secure.txt`.
+Sources : `securite/scans/initial.txt`, `securite/scans/secure.txt`, `securite/scans/dhi.txt`.
 
 ### 3.3 Preuves d'exécution
 
 | Vérification | Résultat |
 |---|---|
 | `curl -sI localhost:8080` | `HTTP/1.1 200 OK`, `Server: nginx/1.29.8` |
-| Santé du conteneur après 15 s | `Up (healthy)` |
+| `curl -s localhost:8081` (DHI) | `HTTP=200` |
+| Santé du conteneur après 15 s | `Up (healthy)` (secure) |
 | `docker exec qs id` | `uid=101(nginx) gid=101(nginx)` |
 | `docker exec qs command -v node npm` | `absent` |
-| `docker inspect` | `ReadonlyRootfs=true`, `CapDrop=[ALL]`, `Memory=134217728`, `NanoCpus=500000000`, `PidsLimit=100`, `Mounts=0` |
+| `docker inspect` (secure) | `ReadonlyRootfs=true`, `CapDrop=[ALL]`, `Memory=134217728`, `NanoCpus=500000000`, `PidsLimit=100`, `Mounts=0` |
+| `docker inspect` (DHI) | `user=65532`, `CapDrop=[ALL]`, `Mounts=0`, `Memory=134217728` |
 | `docker run --rm quiz-docker:secure ls /var/run/docker.sock` | `No such file or directory` |
-| `docker push` | `initial` et `secure` poussées (exit 0) |
+| `docker run --rm --entrypoint sh quiz-docker:dhi -c 'ls /var/run/docker.sock'` | `absent` |
+| `docker push` | `initial`, `secure` et `dhi` poussées (exit 0) |
 
 ### 3.4 Questions d'analyse
 
@@ -226,23 +236,72 @@ paquets qui évoluent. Ici, le scan est propre au jour du build, mais :
 
 ## 4. Mission 4 — Docker Hardened Image (DHI)
 
-**Statut : à compléter après `docker login dhi.io`.**
+**Statut : réalisée** (`docker login dhi.io` effectué, images DHI accessibles).
 
-Atelier de référence : https://docs.docker.com/guides/lab-dhi-node/
+### 4.1 Mise en œuvre
 
-Étapes prévues une fois l'accès au registre obtenu :
+`Dockerfile.dhi` ne diffère de `Dockerfile` que par les bases :
 
-1. Construire une variante `quiz-docker:dhi` en remplaçant l'étape de build par
-   `dhi.io/node:<tag>` et l'étape runtime par `dhi.io/nginx:<tag>` (ou l'image DHI
-   statique correspondante), sans modifier l'application.
-2. Vérifier : utilisateur par défaut, absence de shell, taille, entrées SBOM/provenance.
-3. Scanner avec la même méthode (`docker save` + `trivy image --input`) et reporter les
-   compteurs par sévérité dans le tableau §3.2.
-4. Comparer les propriétés : base distroless, CVE, signature, SBOM, politique de
-   support, coût de migration, compatibilité avec l'écosystème npm.
-5. Conclure sur l'opportunité d'utiliser DHI en production pour cette application.
+- build : `dhi.io/node:22-alpine3.22-dev`. La variante `-dev` est la seule à fournir
+  `npm` (l'image DHI Node standard ne l'embarque pas). Cette étape est jetée.
+- runtime : `dhi.io/nginx:1.30-alpine3.24`, utilisateur `65532`, port 8080.
+- Aucun `apk upgrade` : DHI ne fournit pas de gestionnaire de paquets, et les bases sont
+  patchées par l'éditeur. Un correctif impose donc de reconstruire sur un nouveau tag.
 
-Aucun résultat DHI n'est présenté ici : rien n'a été mesuré, donc rien n'est affirmé.
+```bash
+docker build -f Dockerfile.dhi -t quiz-docker:dhi .
+docker run -d --name qdhi \
+  --read-only \
+  --tmpfs /tmp:uid=65532,gid=65532 \
+  --tmpfs /var/cache/nginx:uid=65532,gid=65532 \
+  --tmpfs /run/nginx:uid=65532,gid=65532 \
+  --tmpfs /var/lib/nginx/tmp:uid=65532,gid=65532 \
+  --tmpfs /var/lib/nginx/logs:uid=65532,gid=65532 \
+  --cap-drop ALL --security-opt no-new-privileges \
+  --memory 128m --cpus 0.5 --pids-limit 100 \
+  -p 8081:8080 quiz-docker:dhi
+```
+
+Les `tmpfs` doivent appartenir à l'uid 65532, sinon nginx échoue en lecture seule
+(`mkdir() "/var/lib/nginx/tmp/client_body" failed (13: Permission denied)`).
+
+### 4.2 Comparaison DHI / image sécurisée
+
+| Critère | `quiz-docker:secure` | `quiz-docker:dhi` |
+|---|---|---|
+| Taille | 118 MB | **24,2 MB** |
+| Base | nginx-unprivileged 1.29 (Alpine 3.23.4) | nginx DHI 1.30 (Alpine 3.24) |
+| Utilisateur | 101 | 65532 |
+| Shell | busybox + `/bin/sh` | busybox + `/bin/sh` (vérifié : `docker exec qdhi sh -c 'echo shell_present'` répond) |
+| Gestionnaire de paquets | apk | absent |
+| CVE (Trivy, tableau complet) | 0 | 0 |
+| Multi-architecture | non testé | index amd64 + arm64, annotation `com.docker.dhi.build.id` |
+| Correctifs | `apk upgrade` au build | nouveau tag DHI à chaque publication |
+
+### 4.3 Enseignements
+
+- **Gain principal : la taille.** 24,2 MB contre 118 MB, soit −79 % par rapport à l'image
+  sécurisée et −89 % par rapport à l'initiale. La base DHI ne contient que nginx et ses
+  dépendances strictes.
+- **Aucun gain CVE mesurable ici.** Les deux images sont à 0 au moment du scan. Les tags
+  DHI plus anciens (`dhi.io/nginx:1.29-alpine3.23`) affichaient 72 vulnérabilités
+  (11 HIGH) : la fraîcheur du tag compte plus que le label « hardened ».
+- **Pas de gain sur le shell.** Contrairement à l'idée reçue « distroless », cette image
+  DHI embarque busybox et un shell. Un attaquant qui obtient une exécution de code
+  conserve un shell minimal.
+- **Contrepartie opérationnelle.** Sans `apk`, impossible de patcher à chaud : il faut
+  rebuilder à chaque publication DHI. C'est un avantage de gouvernance (images
+  immuables, signées en amont) mais une contrainte de pipeline.
+- **Signature et SBOM.** DHI annonce des images signées avec SBOM/provenance. Non
+  vérifié ici : `cosign` n'est pas installé dans cet environnement, donc aucune preuve
+  locale n'est avancée.
+
+**Conclusion.** Pour cette application, DHI est le meilleur candidat production sur la
+taille et la fraîcheur gérée par l'éditeur, à condition d'automatiser la reconstruction
+sur nouveau tag et de conserver un scan en CI. `quiz-docker:secure` reste la variante
+sans dépendance à un registre privé.
+
+Aucune allégation de signature n'est faite sans vérification outillée.
 
 ---
 
@@ -251,16 +310,17 @@ Aucun résultat DHI n'est présenté ici : rien n'a été mesuré, donc rien n'e
 **Améliorations apportées.** Image deux fois plus légère, exécution non-root sans
 capabilities, racine en lecture seule, aucune CVE détectée au build, aucun outil de
 développement dans l'image finale, socket Docker jamais exposé, surface réseau réduite
-à un serveur statique.
+à un serveur statique. La variante DHI descend à 24,2 MB pour le même résultat.
 
 **Risques résiduels.**
 1. Résultat de scan daté : la base doit être reconstruite à chaque correctif amont.
-2. Pas de signature d'image ni de SBOM vérifiable.
-3. Shell présent dans l'image runtime.
+2. Pas de signature d'image ni de SBOM vérifiable localement (`cosign` absent).
+3. Shell présent dans l'image runtime, y compris dans l'image DHI.
 4. HTTP en clair, sans limitation de débit.
 5. Chaîne de build npm non auditée (dépendances de build uniquement).
 6. `apk upgrade` rend le build non strictement reproductible ; à remplacer par une base
-   patchée en production.
+   patchée en production. La variante DHI n'a pas ce défaut mais impose un rebuild à
+   chaque publication de tag.
 
 **Commandes de scan (reproductibles).**
 
@@ -281,9 +341,11 @@ respecte la recommandation du TP.
 |---|---|
 | Dockerfile initial | `dockerfile-exercice2/Dockerfile.initial` |
 | Dockerfile sécurisé | `dockerfile-exercice2/Dockerfile` |
+| Dockerfile DHI | `dockerfile-exercice2/Dockerfile.dhi` |
 | `.dockerignore` | `dockerfile-exercice2/.dockerignore` |
 | Scans avant | `dockerfile-exercice2/securite/scans/initial.txt` |
 | Scans après | `dockerfile-exercice2/securite/scans/secure.txt` |
+| Scan DHI | `dockerfile-exercice2/securite/scans/dhi.txt` |
 | Rapport | ce fichier |
-| Images publiées | `cavydev/quiz-docker:initial`, `cavydev/quiz-docker:secure` |
+| Images publiées | `cavydev/quiz-docker:initial`, `:secure`, `:dhi` |
 | Dépôt Git | https://github.com/adam-benyekkou/docker-introduction-adam (branche `docker-exercice-securite`) |

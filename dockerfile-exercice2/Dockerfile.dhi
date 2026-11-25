@@ -1,0 +1,30 @@
+# syntax=docker/dockerfile:1
+# Variante Docker Hardened Image — quiz-docker
+# Build : docker build -f Dockerfile.dhi -t quiz-docker:dhi .
+#
+# Différences avec Dockerfile :
+#   - bases DHI (dhi.io) : minimales, signées, utilisateur non-root par défaut
+#   - aucun HEALTHCHECK : l'image n'embarque ni shell ni wget
+#   - aucun apk upgrade : les bases DHI sont patchées et signées en amont
+
+# Étape de build : variante "-dev" de l'image DHI — elle seule fournit npm.
+# L'étape est jetée : aucun outil de build n'atteint l'image finale.
+FROM dhi.io/node:22-alpine3.22-dev AS build
+
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+RUN npm ci
+
+COPY index.html main.js style.css vite.config.js javascript.svg ./
+COPY questions_defaut.js questions_defaut_2.js ./
+COPY images ./images
+COPY public ./public
+
+RUN npm run build
+
+FROM dhi.io/nginx:1.30-alpine3.24
+
+COPY --from=build /app/dist /usr/share/nginx/html
+
+EXPOSE 8080
