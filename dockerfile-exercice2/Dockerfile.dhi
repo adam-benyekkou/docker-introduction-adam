@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-# Variante Docker Hardened Image — quiz-docker
+# Variante Docker Hardened Image : quiz-docker
 # Build : docker build -f Dockerfile.dhi -t quiz-docker:dhi .
 #
 # Différences avec Dockerfile :
@@ -7,7 +7,7 @@
 #   - aucun HEALTHCHECK : wget n'est pas fourni dans l'image
 #   - aucun apk upgrade : pas de gestionnaire de paquets, rebuild sur nouveau tag
 
-# Étape de build : variante "-dev" de l'image DHI — elle seule fournit npm.
+# Étape de build : la variante "-dev" est la seule à fournir npm.
 # L'étape est jetée : aucun outil de build n'atteint l'image finale.
 FROM dhi.io/node:22-alpine3.22-dev AS build
 
