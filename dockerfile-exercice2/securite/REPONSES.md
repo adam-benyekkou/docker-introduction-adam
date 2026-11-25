@@ -32,7 +32,7 @@ qu'à la compilation.
 | Chaîne d'outils inutile en runtime | `node`, `npm`, `apk`, `sh` présents dans l'image finale |
 | Surface d'attaque élevée | 264 vulnérabilités dont **5 CRITICAL / 83 HIGH** |
 | Tag de base flottant | `node:18-alpine`, contenu variable selon les rebuilds |
-| `.dockerignore` minimal | 3 motifs seulement : un `.env` ou `*.pem` entre dans l'image via `COPY . .` |
+| `.dockerignore` minimal | 3 motifs seulement (`Dockerfile.initial.dockerignore`) : un `.env` ou `*.pem` entre dans l'image via `COPY . .` |
 | Aucune limite runtime | Ni mémoire, ni CPU, ni `pids-limit`, ni `cap-drop` |
 | Socket Docker | Non monté ici, mais aucun garde-fou documenté contre ce montage |
 
@@ -58,12 +58,13 @@ qu'à la compilation.
 | `COPY` / `ADD` | `COPY . .` |
 | Limites CPU/mémoire | aucune |
 | Capabilities | par défaut (toutes celles du moteur) |
-| System de fichiers racine | inscriptible |
+| Système de fichiers racine | inscriptible |
 | Socket Docker | non monté |
 | CVE CRITICAL | **5** |
 | CVE HIGH | **83** |
 | CVE MEDIUM | **130** |
 | CVE LOW | **45** |
+| CVE UNKNOWN | **1** |
 | Total CVE | **264** |
 
 Détail Trivy (`securite/scans/initial.txt`) : Alpine 3.21.3 → 100 (2C/22H/41M/35L),
@@ -77,7 +78,7 @@ paquets Node → 75 (1C/32H/36M/6L), npm → 89 (2C/29H/53M/4L).
 |---|---|---|---|
 | Image de base minimale | Dockerfile | runtime `nginxinc/nginx-unprivileged:1.29-alpine3.23`, seulement `dist/` copié | `docker exec qs command -v node npm` → absent |
 | Ne pas tourner en root | Dockerfile | `USER 101` (image non privilégiée) | `docker exec qs id` → `uid=101(nginx)` |
-| `.dockerignore` | Build | secrets, artefacts, `.git`, outillage, livrables exclus | `.dockerignore` (11 groupes de motifs) |
+| `.dockerignore` | Build | secrets, artefacts, `.git`, outillage, livrables exclus | `.dockerignore` (18 motifs) |
 | Tags d'images précis | Dockerfile | `node:22.22-alpine3.24` et `nginxinc/nginx-unprivileged:1.29-alpine3.23` | `grep '^FROM' Dockerfile` |
 | `COPY` plutôt que `ADD` | Dockerfile | uniquement des `COPY` explicites, aucune URL ni archive | `grep -c '^ADD' Dockerfile` → 0 |
 | Limiter ressources et privilèges | Exécution | `--memory 128m --cpus 0.5 --pids-limit 100 --cap-drop ALL --security-opt no-new-privileges --read-only` | `docker inspect` : `Memory=134217728`, `NanoCpus=500000000`, `PidsLimit=100`, `CapDrop=[ALL]`, `ReadonlyRootfs=true` |
@@ -87,7 +88,7 @@ paquets Node → 75 (1C/32H/36M/6L), npm → 89 (2C/29H/53M/4L).
 
 **Correctifs de paquets.** La base épinglée peut être en retard sur des CVE déjà corrigées
 en amont. Le Dockerfile applique donc `apk upgrade --no-cache` dans l'étape runtime
-(bloc `USER root` limité à cette couche). Effet mesuré : **248 → 0 vulnérabilité**. En
+(bloc `USER root` limité à cette couche). Effet mesuré : **248 → 0 vulnérabilité** (`securite/scans/secure-sans-upgrade.txt` contre `secure.txt`). En
 production, la pratique de référence reste de reconstruire depuis une base patchée ; cet
 upgrade est un filet de sécurité, pas un substitut au cycle de mise à jour.
 
@@ -109,8 +110,8 @@ Un processus non-root ne peut pas ouvrir un port < 1024. L'image
 - Node runtime + `vite preview` : garde toute la chaîne Node, donc les CVE npm.
 - `nginx` standard + `USER nginx` : nginx standard écrit dans `/var/cache/nginx` et
   `/var/run` en root au démarrage ; l'image non privilégiée est déjà adaptée.
-- Image DHI : étudiée en mission 4 et non retenue comme base par défaut ici, car elle
-  exige un accès au registre `dhi.io`.
+- Image DHI : étudiée en mission 4 (`Dockerfile.dhi`). Meilleure sur la taille (24,2 MB),
+  équivalente sur les CVE ; voir §4.3 pour la conclusion et ses contreparties.
 
 ---
 
@@ -130,7 +131,7 @@ docker run -d --name qs \
   --read-only --tmpfs /tmp --tmpfs /var/cache/nginx --tmpfs /var/run \
   --cap-drop ALL --security-opt no-new-privileges \
   --memory 128m --cpus 0.5 --pids-limit 100 \
-  -p 8080:8080 quiz-docker:secure
+  -p 127.0.0.1:8080:8080 quiz-docker:secure
 
 # Publication
 docker tag quiz-docker:initial cavydev/quiz-docker:initial
@@ -170,6 +171,7 @@ docker push cavydev/quiz-docker:dhi
 | Total CVE | 264 | **0** | **0** |
 
 Sources : `securite/scans/initial.txt`, `securite/scans/secure.txt`, `securite/scans/dhi.txt`.
+Chiffres intermédiaires : 248 (`secure-sans-upgrade.txt`), 72 (`base129.txt`).
 
 ### 3.3 Preuves d'exécution
 
@@ -215,7 +217,8 @@ paquets qui évoluent. Ici, le scan est propre au jour du build, mais :
 - une nouvelle CVE peut apparaître le lendemain ; le résultat n'est valable qu'à date ;
 - les dépendances npm ne sont plus dans l'image finale, mais leur chaîne de build n'est
   pas vérifiée (pas de `npm audit`, pas de provenance) ;
-- l'image n'est ni signée ni accompagnée d'un SBOM vérifiable ;
+- l'image n'est pas signée et ne porte pas de SBOM (l'attestation de provenance SLSA
+  générée par BuildKit est présente, mais ne remplace ni l'un ni l'autre) ;
 - l'image runtime contient un shell (busybox), utile à un attaquant qui obtient une
   exécution de code ;
 - l'exposition réseau reste HTTP en clair, sans TLS, sans limitation de débit ni WAF ;
@@ -225,7 +228,8 @@ paquets qui évoluent. Ici, le scan est propre au jour du build, mais :
 1. CI qui bloque sur CVE CRITICAL/HIGH (Trivy + `--exit-code`), avec rebuild
    automatique lors de la publication d'une base patchée.
 2. SBOM (Syft/Trivy) et signature d'image (cosign), vérification à l'admission.
-3. Runtime sans shell (distroless ou Docker Hardened Image, cf. mission 4).
+3. Runtime sans shell : l'image DHI testée en mission 4 embarque busybox et `/bin/sh`
+   (§4.3) ; il faut une variante réellement distroless pour supprimer le shell.
 4. `securityContext` Kubernetes équivalent : non-root, `readOnlyRootFilesystem`,
    `allowPrivilegeEscalation: false`, `seccompProfile: RuntimeDefault`.
 5. Politiques réseau, TLS en terminaison, limitation de débit, WAF.
@@ -259,7 +263,7 @@ docker run -d --name qdhi \
   --tmpfs /var/lib/nginx/logs:uid=65532,gid=65532 \
   --cap-drop ALL --security-opt no-new-privileges \
   --memory 128m --cpus 0.5 --pids-limit 100 \
-  -p 8081:8080 quiz-docker:dhi
+  -p 127.0.0.1:8081:8080 quiz-docker:dhi
 ```
 
 Les `tmpfs` doivent appartenir à l'uid 65532, sinon nginx échoue en lecture seule
@@ -293,7 +297,7 @@ Les `tmpfs` doivent appartenir à l'uid 65532, sinon nginx échoue en lecture se
   conserve un shell minimal.
 - **Contrepartie opérationnelle.** Sans `apk`, impossible de patcher à chaud : il faut
   rebuilder à chaque publication DHI. C'est un avantage de gouvernance (images
-  immuables, signées en amont) mais une contrainte de pipeline.
+  immuables, signature annoncée par l'éditeur mais non vérifiée ici) mais une contrainte de pipeline.
 - **Signature et SBOM.** DHI annonce des images signées avec SBOM/provenance. Non
   vérifié ici : `cosign` n'est pas installé dans cet environnement, donc aucune preuve
   locale n'est avancée.
@@ -316,13 +320,24 @@ développement dans l'image finale, socket Docker jamais exposé, surface résea
 
 **Risques résiduels.**
 1. Résultat de scan daté : la base doit être reconstruite à chaque correctif amont.
-2. Pas de signature d'image ni de SBOM vérifiable localement (`cosign` absent).
+2. Pas de signature d'image ni de SBOM (`imagetools inspect --format '{{json .SBOM}}'`
+   renvoie `{}`) ; seule une provenance SLSA BuildKit est attachée. `cosign` absent.
 3. Shell présent dans l'image runtime, y compris dans l'image DHI.
 4. HTTP en clair, sans limitation de débit.
-5. Chaîne de build npm non auditée (dépendances de build uniquement).
+5. Chaîne de build npm : `npm audit` (`securite/scans/npm-audit.txt`) signale des
+   vulnérabilités dans les dépendances de build (Vite, `source-map-js`). Elles restent dans
+   l'étape `build`, jetée, et n'atteignent pas l'image finale ; l'application n'est pas
+   modifiée, conformément à la consigne.
 6. `apk upgrade` rend le build non strictement reproductible ; à remplacer par une base
    patchée en production. La variante DHI n'a pas ce défaut mais impose un rebuild à
    chaque publication de tag.
+7. Bases non épinglées par digest (`@sha256:…`) et `# syntax=docker/dockerfile:1` flottant :
+   un tag peut être republié. En production, épingler par digest
+   (`docker buildx imagetools inspect <image>`).
+8. Identifiants Docker Hub stockés en base64 dans `~/.docker/config.json` (aucun
+   `credsStore`) : à remplacer par un credential helper. Hors dépôt, rien n'a fui.
+9. L'image DHI n'a pas de `HEALTHCHECK` (pas de `wget`) ; la supervision doit venir de
+   l'orchestrateur.
 
 **Commandes de scan (reproductibles).**
 
@@ -341,13 +356,14 @@ respecte la recommandation du TP.
 
 | Livrable | Fichier |
 |---|---|
-| Dockerfile initial | `dockerfile-exercice2/Dockerfile.initial` |
+| Dockerfile initial | `dockerfile-exercice2/Dockerfile.initial` (+ `Dockerfile.initial.dockerignore`, les 3 motifs d'origine) |
 | Dockerfile sécurisé | `dockerfile-exercice2/Dockerfile` |
 | Dockerfile DHI | `dockerfile-exercice2/Dockerfile.dhi` |
 | `.dockerignore` | `dockerfile-exercice2/.dockerignore` |
 | Scans avant | `dockerfile-exercice2/securite/scans/initial.txt` |
 | Scans après | `dockerfile-exercice2/securite/scans/secure.txt` |
 | Scan DHI | `dockerfile-exercice2/securite/scans/dhi.txt` |
+| Scans intermédiaires | `dockerfile-exercice2/securite/scans/secure-sans-upgrade.txt`, `base129.txt`, `npm-audit.txt` |
 | Scan base DHI seule | `dockerfile-exercice2/securite/scans/base130.txt` |
 | Rapport | ce fichier |
 | Images publiées | `cavydev/quiz-docker:initial`, `:secure`, `:dhi` |
