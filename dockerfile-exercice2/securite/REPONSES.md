@@ -283,9 +283,11 @@ Les `tmpfs` doivent appartenir à l'uid 65532, sinon nginx échoue en lecture se
 - **Gain principal : la taille.** 24,2 MB contre 118 MB, soit −79 % par rapport à l'image
   sécurisée et −89 % par rapport à l'initiale. La base DHI ne contient que nginx et ses
   dépendances strictes.
-- **Aucun gain CVE mesurable ici.** Les deux images sont à 0 au moment du scan. Les tags
-  DHI plus anciens (`dhi.io/nginx:1.29-alpine3.23`) affichaient 72 vulnérabilités
-  (11 HIGH) : la fraîcheur du tag compte plus que le label « hardened ».
+- **Aucun gain CVE mesurable ici.** Les deux images sont à 0 au moment du scan. Le tag
+  DHI `1.29-alpine3.23` mesurait, lui, 72 vulnérabilités (11 HIGH) pendant l'audit :
+  la fraîcheur du tag compte plus que le label « hardened ». Le scan de la base DHI
+  1.30 seule (`securite/scans/base130.txt`) confirme 0 vulnérabilité avant même
+  l'ajout de l'application.
 - **Pas de gain sur le shell.** Contrairement à l'idée reçue « distroless », cette image
   DHI embarque busybox et un shell. Un attaquant qui obtient une exécution de code
   conserve un shell minimal.
@@ -346,6 +348,7 @@ respecte la recommandation du TP.
 | Scans avant | `dockerfile-exercice2/securite/scans/initial.txt` |
 | Scans après | `dockerfile-exercice2/securite/scans/secure.txt` |
 | Scan DHI | `dockerfile-exercice2/securite/scans/dhi.txt` |
+| Scan base DHI seule | `dockerfile-exercice2/securite/scans/base130.txt` |
 | Rapport | ce fichier |
 | Images publiées | `cavydev/quiz-docker:initial`, `:secure`, `:dhi` |
 | Dépôt Git | https://github.com/adam-benyekkou/docker-introduction-adam (branche `docker-exercice-securite`) |
