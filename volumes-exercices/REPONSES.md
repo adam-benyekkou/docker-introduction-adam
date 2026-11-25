@@ -1,8 +1,5 @@
 # TP Volumes Docker — Compte rendu
 
-Toutes les sorties ci-dessous sont réelles (25/11/2026). Version détaillée :
-`REPONSES-detail.md`.
-
 ## L'essentiel en trois lignes
 
 | Montage       | Où vivent les données                             | Survivent à `docker rm` |
