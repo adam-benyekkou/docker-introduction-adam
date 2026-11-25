@@ -1,3 +1,29 @@
+# Dépendances et artefacts : reconstruits dans l'image
 node_modules
+dist
+
+# Métadonnées Git
 .git
+.gitignore
+
+# Secrets et configuration locale : ne doivent jamais entrer dans le contexte
+.env
+.env.*
+*.pem
+*.key
+
+# Fichiers propres au poste / à l'outillage
+.opencode
+.vscode
+.DS_Store
 *.log
+
+# Fichiers Docker et documentation : inutiles au build
+Dockerfile
+Dockerfile.*
+.dockerignore
+README.md
+
+# Livrables de l'audit de sécurité (scans, rapport)
+securite
+*.old
